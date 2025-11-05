@@ -1,0 +1,25 @@
+.venv_api/
+dados-locais/
+Nova pasta/
+
+
+# Arquivos de cache e de configuração específicos do ambiente
+__pycache__/
+.env
+*.pyc
+carregar_dados.txt
+test_supabase_connection.py
+
+# Arquivos de log e de banco de dados
+*.log
+*.sqlite
+cache.dbdados_locais/
+
+# Arquivos do Curso
+arquivo_para_ler/
+carregar_dados.txt
+ANALISE_CONFORMIDADE_DOCUMENTO.md
+ANALISE_RASA_AI.md
+GUIA_API_RASA.md
+NOVOS_ENDPOINTS.md
+RESUMO_CORRECOES.md
