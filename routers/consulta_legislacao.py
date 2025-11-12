@@ -1,4 +1,3 @@
-
 from typing import List
 from fastapi import APIRouter, Query, HTTPException
 from schemas.sch_base_consultas import LegislacaoSchema
@@ -9,12 +8,13 @@ router = APIRouter(
     tags=["Legislação Ambiental"]
 )
 
+### BUSCAR OS TERMOS DE LEGISLAÇÃO ###
 @router.get("/buscar", response_model=List[LegislacaoSchema])
 def buscar_legislacao(
     termo: str = Query(..., min_length=3, description="Termo a ser buscado no título ou resumo da legislação")
 ):
     try:
-        # Busca o termo no título OU no resumo (case-insensitive)
+        # Busca o termo no título OU no resumo
         response = supabase.table('legislacao_ambiental').select("*").or_(
             f"titulo.ilike.%{termo}%,resumo.ilike.%{termo}%"
         ).execute()

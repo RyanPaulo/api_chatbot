@@ -8,14 +8,11 @@ router = APIRouter(
     tags=["Consultas de Cadastro Técnico Federal"]
 )
 
-# EXEMPLO = /api/ctf/cnpj/{cnpj}
+### ROUTER PARA CONSULTA O CADASTRA TECNICO FEDERAL PELO 'CNPJ'  ###
 @router.get("/cnpj/{cnpj}", response_model=RespostaCTFSchema)
 def consultar_ctf_por_cnpj(
     cnpj: str = Path(..., title="CNPJ a ser consultado")
 ):
-    """
-    Busca o cadastro técnico federal de uma pessoa jurídica pelo CNPJ.
-    """
     cnpj_limpo = "".join(filter(str.isdigit, cnpj))
 
     try:
@@ -34,17 +31,12 @@ def consultar_ctf_por_cnpj(
     return {"cnpj": cnpj_limpo, "cadastro": dado}
 
 
-# EXEMPLO = /api/ctf/situacao/{situacao}
+### ROUTER PARA CONSULTA A SITUACAO CADASTRA TECNICO FEDERAL  ###
 @router.get("/situacao/{situacao}", response_model=List[CadastroTecnicoFederalSchema])
 def consultar_ctf_por_situacao(
     situacao: str = Path(..., title="Situação cadastral a ser consultada")
 ):
-    """
-    Busca todas as pessoas jurídicas com uma determinada situação cadastral no CTF.
-    Exemplos de situações: 'Ativo', 'Inativo', 'Suspenso', etc.
-    """
     try:
-        # .ilike() faz uma busca "case-insensitive" (ignora maiúsculas/minúsculas)
         response = supabase.table('cadastro_tecnico_federal').select("*").ilike('situacao_cadastro', f'%{situacao}%').execute()
         dados = response.data
     except Exception as e:

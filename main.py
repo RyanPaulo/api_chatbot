@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import endpoint01, consulta_municipio, consulta_recentes, consulta_glossario, consulta_legislacao, consulta_embargos, consulta_ctf
+from routers import consulta_cnpj_cpf, consulta_municipio, consulta_recentes, consulta_glossario, consulta_legislacao, consulta_embargos, consulta_ctf
 
 # Cria uma instância da aplicação FastAPI
 app = FastAPI(

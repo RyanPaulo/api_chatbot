@@ -15,6 +15,9 @@ test_supabase_connection.py
 *.sqlite
 cache.dbdados_locais/
 
+
+dados_locais/
+
 # Arquivos do Curso
 arquivo_para_ler/
 carregar_dados.txt

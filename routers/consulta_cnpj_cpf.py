@@ -8,9 +8,8 @@ router = APIRouter(
     tags=["Consultas de Autuações"]
 )
 
-# EXEMPLO = /api/autuacoes/documento/{cpf_cnpj}
+### CONSULTA O 'cnpj' ou o 'cpf' ###
 @router.get("/{cpf_cnpj}", response_model=RespostaConsultaSchema)
-
 def consultar_por_documento(cpf_cnpj: str = Path(..., title="CPF ou CNPJ a ser consultado")):
 
     documento_limpo = "".join(filter(str.isdigit, cpf_cnpj))

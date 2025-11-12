@@ -8,16 +8,12 @@ router = APIRouter(
     tags=["Consultas de Autuações por Município"]
 )
 
-# EXEMPLO = /api/autuacoes/municipio/{nome_municipio}
+### BUSCA TODAS AS AUTUÇÕES REGISTRADA EM UM DETERMINADO MUNICIPIO ###
 @router.get("/{nome_municipio}", response_model=List[AutuacaoSchema] )
 def consultar_por_municipio(
     nome_municipio: str = Path(..., title="Nome do município a ser consultado")
 ):
-    """
-    Busca todas as autuações registradas em um determinado município.
-    """
     try:
-        # .ilike() faz uma busca "case-insensitive" (ignora maiúsculas/minúsculas)
         response = supabase.table('autuacoes_ibama').select("*").ilike('municipio', f'%{nome_municipio}%').execute()
         dados = response.data
     except Exception as e:

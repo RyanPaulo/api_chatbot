@@ -44,6 +44,7 @@ class TermoEmbargoSchema(BaseModel):
     uf: Optional[str] = None
     wkt_geometria: Optional[str] = None
 
+## SCHEMA PARA CONSULTA DOS ENBARGOS ##
 class RespostaEmbargoSchema(BaseModel):
     documento: str
     embargos: List[TermoEmbargoSchema]
@@ -57,6 +58,7 @@ class CadastroTecnicoFederalSchema(BaseModel):
     situacao_cadastro: Optional[str] = None
     data_situacao_cadastral: Optional[str] = None
     uf: Optional[str] = None
+
 
 class RespostaCTFSchema(BaseModel):
     cnpj: str

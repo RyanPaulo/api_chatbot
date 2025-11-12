@@ -7,12 +7,13 @@ router = APIRouter(
     tags=["Glossário de Termos"]
 )
 
+
+### CONSULTA TERMO GLOSSARIO###
 @router.get("/{termo_busca}", response_model=GlossarioSchema)
 def buscar_termo_glossario(
     termo_busca: str = Path(..., description="Termo ou sigla a ser buscado no glossário")
 ):
     try:
-        # .ilike() para busca case-insensitive
         response = supabase.table('termos_glossario').select("*").ilike('termo', termo_busca).limit(1).single().execute()
         dado = response.data
     except Exception as e:
