@@ -1,3 +1,8 @@
+Com certeza! Fiz todos os ajustes que você orientou, corrigi os erros de numeração e estrutura, e melhorei a clareza das explicações. O resultado é um `README.md` muito mais completo e profissional.
+
+Aqui está a versão final e corrigida do arquivo, pronta para ser copiada e colada no seu projeto.
+
+```markdown
 # Chatbot de Conformidade Ambiental
 
 ## Objetivo do Projeto
@@ -6,25 +11,28 @@ Este projeto tem como objetivo principal desenvolver uma solução tecnológica 
 
 O sistema funciona como uma ponte inteligente entre as bases de dados abertas do IBAMA e o usuário final (cidadãos, empresas, pesquisadores), permitindo a realização de consultas em linguagem natural e recebendo respostas claras, contextualizadas e de fácil compreensão.
 
-A arquitetura é baseada em microsserviços, composta por dois componentes principais:
-1.  **API (FastAPI):** Um serviço de backend que centraliza, processa e armazena os dados ambientais, expondo-os de forma segura e otimizada.
-        # < AQUI SEPARE EM DOIS TOPICO, UM FALANDO DOS 'ENDPOINTS' PARA CUNSULTAS E O OUTRO FALANDO DOS 'ETL' QUE ESTAMOS USANDO PARA ESTRAIR O DADOS DA API DO IBAMA>
-2.  **Chatbot (Rasa):** A interface conversacional que interpreta as perguntas do usuário, gerencia o diálogo e consome os dados fornecidos pela API para formular as respostas.
-3.  **Supabase :** <AQUI QUERO QUE EXPLIQUE QUE ESTA SENDO USADO O SUPABASE PARA ARMAZENA COM SEGURANÇA OS DADOS ESTRAIDO DO 'IBAMA'>
+A arquitetura é baseada em microsserviços, composta por três componentes principais:
+
+1.  **API (FastAPI):** É o coração do sistema, um serviço de backend que centraliza a lógica de acesso aos dados.
+    *   **Endpoints de Consulta:** A API expõe endpoints seguros (rotas) que o chatbot utiliza para solicitar informações específicas, como "consultar CNPJ" ou "buscar infrações por município". Isso desacopla a lógica do chatbot da fonte de dados.
+    *   **Processo de ETL:** A API também contém scripts de ETL (Extração, Transformação e Carga) responsáveis por buscar os dados brutos diretamente do Portal de Dados Abertos do IBAMA, limpá-los, padronizá-los e carregá-los em nosso banco de dados.
+
+2.  **Chatbot (Rasa):** É a interface conversacional que interpreta as perguntas do usuário, gerencia o diálogo e consome os dados fornecidos pela API para formular as respostas.
+
+3.  **Supabase (PostgreSQL):** Utilizamos o Supabase como nossa plataforma de banco de dados. Ele armazena de forma segura e persistente todos os dados que foram extraídos do IBAMA pelo processo de ETL. Isso garante que as consultas do chatbot sejam extremamente rápidas e não dependam da disponibilidade do site do IBAMA em tempo real.
 
 ## Guia de Instalação e Execução Local
 
 Para executar o projeto, é necessário configurar e rodar os dois serviços (API e Chatbot) de forma independente, em terminais separados.
 
 **Pré-requisitos:**
-*   Python 3.10.18.
+*   Python 3.10 ou superior.
 
 ---
 
-### Parte 1: Configuração do Ambiente da API (FastAPI)
+### Parte 1: Configuração e Execução da API (FastAPI)
 
 Siga estes passos dentro do diretório `api_chatbot/`.
-* ...\Conformidade_Ambiental_Projeto\api_chatbot
 
 **1. Acesse o diretório da API:**
 ```shell
@@ -47,33 +55,29 @@ source .venv_api/bin/activate
 
 # No Windows
 .\.venv_api\Scripts\activate
-
 ```
 
-**4. Instale todas as bibliotecas necessárias:**
+**4. Instale as bibliotecas necessárias:**
 ```shell
 pip install -r requirements.txt
 ```
 
+**5. Execute o servidor da API:**
+> **Importante:** Antes de executar, certifique-se de que o arquivo `.env` na raiz do diretório `api_chatbot/` está preenchido com as credenciais do seu banco de dados Supabase.
 
-**5. Execute o servidor da APi:**
-###### Para que o rasa se conecte com a api deve esta na porta 8000, localmente.
-###### Antes de execurtar o servidor da API, deve-se editar o arquivo '.env' com os tokens do banco de dasdo
-
+O servidor da API deve rodar na porta `8000` para que o Rasa possa se conectar localmente.
 ```shell
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-
-
+> Deixe este terminal aberto. O servidor da API está ativo.
 
 ---
 
-### Parte 2: Configuração do Ambiente da API (FastAPI)
+### Parte 2: Configuração e Execução do Chatbot (Rasa)
 
-Siga estes passos dentro do diretório `chatbot_rasa/`.
-* ...\Conformidade_Ambiental_Projeto\chatbot_rasa
+Abra um **novo terminal** e siga estes passos dentro do diretório `chatbot_rasa/`.
 
-**1. Acesse o diretório da API:**
+**1. Acesse o diretório do Chatbot:**
 ```shell
 cd chatbot_rasa
 ```
@@ -94,42 +98,41 @@ source .venv_rasa/bin/activate
 
 # No Windows
 .\.venv_rasa\Scripts\activate
-
 ```
 
-**4. Instale todas as bibliotecas necessárias:**
+**4. Instale as bibliotecas necessárias:**
 ```shell
 pip install -r requirements.txt
-
-# Para testar se a biblioteca rasa  foi instalado com sucesso
+```
+Para verificar se o Rasa foi instalado com sucesso, você pode rodar:
+```shell
 rasa --version
 ```
 
-**5. Treinar o bot rasa:**
+**5. Treine o modelo do Rasa:**
+Este comando lê seus arquivos de treinamento (`data/`) e gera um novo modelo em `models/`.
 ```shell
 rasa train
 ```
 
-**7. Executar o servidor principal do rasa:**
+**6. Execute o servidor de ações (Actions Server):**
+> Abra um **terceiro terminal**, ative o ambiente `.venv_rasa` nele e execute o comando abaixo. Este servidor executa o código Python customizado que se conecta à sua API.
 ```shell
 rasa run actions
 ```
+> Deixe este terminal aberto.
 
-**8. Executar o chatbot no terminal :**
-
-###### *rasa shell* : Nos ajuda a testar as respostas que esta sendo gerada antes de por em produção e de forma rapida.
-
+**7. Teste o chatbot no terminal:**
+> Voltando ao **segundo terminal** (onde você treinou o modelo), você pode conversar com o bot para testes rápidos.
 ```shell
 rasa shell
 ```
 
-**8. Executar o servidor de conexao externa (Telegram) :**
+**8. Execute o servidor principal para conexão externa (Ex: Telegram):**
+> Para conectar ao Telegram, use este comando no **segundo terminal** (em vez do `rasa shell`).
 
-###### Deve-se editar as credenciais para conexao com telegram no arquivo *credentials.yml
-* access_token: 'TOKEN DO PERFIL TELEGRAM'
-* access_token:'NOME DO SEU CHATBOT'
-* webhook_url: 'URL WEBHOOK PARA O TUNEL ENTRE O SERVIDOR RASA COM O TELEGRAM'
-
+**Importante:** Antes de executar, edite o arquivo `credentials.yml` com seu token do Telegram e o `endpoints.yml` com a URL do webhook gerada por uma ferramenta como o `ngrok`.
 ```shell
 rasa run -m models --enable-api --cors "*" --credentials credentials.yml
+```
 ```
