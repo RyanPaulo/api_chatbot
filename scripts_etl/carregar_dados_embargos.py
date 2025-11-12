@@ -1,65 +1,59 @@
-# api_chatbot/scripts_etl/carregar_dados_embargos.py
-
 import os
 import pandas as pd
-from supabase import create_client, Client
-from dotenv import load_dotenv
 import time
 import numpy as np
+import requests
+import zipfile
+import io
+
+try:
+    from ..supabase_cliente import supabase
+except ImportError:
+    # Adiciona o caminho do projeto para permitir a execução direta do script
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from supabase_client import supabase
 
 
-# --- 1. CONFIGURAÇÃO E CONEXÃO ---
-
-def setup_supabase_client() -> Client:
-    """
-    Carrega as variáveis de ambiente e inicializa o cliente Supabase.
-    """
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-
-    print(f"Procurando arquivo .env em: {os.path.abspath(dotenv_path)}")
-    load_dotenv(dotenv_path=dotenv_path)
-
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
-
-    if not supabase_url or not supabase_key:
-        raise Exception("ERRO: As variáveis de ambiente SUPABASE_URL e SUPABASE_KEY não foram definidas.")
-
-    print("Credenciais do Supabase carregadas com sucesso.")
-    return create_client(supabase_url, supabase_key)
-
-
-# --- Variáveis de Configuração ---
-
-NOME_ARQUIVO_LOCAL = "termo_embargo.csv"
-CAMINHO_ARQUIVO_LOCAL = os.path.join(os.path.dirname(__file__), '..', 'dados_locais', NOME_ARQUIVO_LOCAL)
+# URL direta para o arquivo  no portal de dados abertos do IBAMA
+URL_DADOS_IBAMA_ZIP = "https://dadosabertos.ibama.gov.br/dados/SIFISC/termo_embargo/termo_embargo/termo_embargo_csv"
 NOME_TABELA = "termos_embargo"
 
+## FUNÇÃO PARA TERMOS DE EMBARGO
+def carregar_dados_embargos( ):
+    print("\n--- INICIANDO PROCESSO DE ETL (TERMOS DE EMBARGO - VIA URL) ---")
 
-def carregar_dados(supabase: Client):
-    """
-    Função principal que executa o processo de ETL para os dados de Termos de Embargo.
-    """
-    print("\n--- INICIANDO PROCESSO DE ETL (TERMOS DE EMBARGO - LOCAL) ---")
-
-    # --- 2. EXTRAÇÃO (Extraction) ---
-    print(f"1. Lendo o arquivo CSV local de: {CAMINHO_ARQUIVO_LOCAL}")
+    print(f"1. Extraindo dados do arquivo ZIP da URL:\n   {URL_DADOS_IBAMA_ZIP}")
     try:
-        df = pd.read_csv(CAMINHO_ARQUIVO_LOCAL, sep=';', encoding='latin-1', on_bad_lines='skip', low_memory=False)
-        print("   - Arquivo lido com sucesso.")
-    except FileNotFoundError:
-        print(f"   - ERRO CRÍTICO: Arquivo '{NOME_ARQUIVO_LOCAL}' não encontrado na pasta 'dados_locais'.")
-        return
+        # Faz o download do conteúdo do arquivo .zip em memória
+        response = requests.get(URL_DADOS_IBAMA_ZIP)
+        response.raise_for_status()  # Lança um erro se o download falhar (ex: 404)
+
+        # Abre o arquivo .zip a partir do conteúdo baixado
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            # Encontra o primeiro arquivo .csv dentro do .zip
+            nome_csv = next((f for f in z.namelist() if f.endswith('.csv')), None)
+            if not nome_csv:
+                raise FileNotFoundError("Nenhum arquivo .csv encontrado dentro do .zip baixado.")
+
+            print(f"   - Arquivo CSV encontrado no ZIP: '{nome_csv}'")
+            # Lê o arquivo CSV diretamente do .zip
+            with z.open(nome_csv) as f:
+                df = pd.read_csv(
+                    f,
+                    sep=';',
+                    encoding='latin-1', # Mantido pois é comum em dados governamentais mais antigos
+                    on_bad_lines='skip',
+                    low_memory=False
+                )
+        print("   - Dados extraídos com sucesso.")
     except Exception as e:
-        print(f"   - ERRO CRÍTICO ao ler o arquivo: {e}")
+        print(f"   - ERRO CRÍTICO ao baixar e ler os dados da URL: {e}")
         return
 
-    # --- 3. TRANSFORMAÇÃO (Transformation) ---
     print("2. Transformando os dados...")
 
-    # ==================================================================
-    # CORREÇÃO PRINCIPAL: Ajustando o mapeamento de colunas
-    # ==================================================================
+    # Mapeamento das colunas do CSV para as colunas do nosso banco de dados
     mapa_colunas = {
         'CPF_CNPJ_EMBARGADO': 'cpf_cnpj',
         'NOME_EMBARGADO': 'nome_embargado',
@@ -68,29 +62,28 @@ def carregar_dados(supabase: Client):
         'MUNICIPIO': 'municipio',
         'UF': 'uf'
     }
+    colunas_necessarias = list(mapa_colunas.keys())
 
-    colunas_no_csv = list(mapa_colunas.keys())
-
-    if not all(col in df.columns for col in colunas_no_csv):
+    if not all(col in df.columns for col in colunas_necessarias):
         print("   - ERRO CRÍTICO: Colunas essenciais não foram encontradas no arquivo CSV.")
-        print(f"   - Colunas esperadas: {colunas_no_csv}")
+        print(f"   - Colunas esperadas: {colunas_necessarias}")
         print(f"   - Colunas encontradas: {df.columns.tolist()}")
         return
 
-    print(f"   - Mapeando as colunas...")
-    df = df[colunas_no_csv].rename(columns=mapa_colunas)
+    print("   - Mapeando e renomeando colunas...")
+    df = df[colunas_necessarias].rename(columns=mapa_colunas)
 
-    # Limpeza e conversão de tipos
+    print("   - Limpando e formatando os dados...")
     df['cpf_cnpj'] = df['cpf_cnpj'].astype(str).str.replace(r'\D', '', regex=True)
     df['data_embargo'] = pd.to_datetime(df['data_embargo'], errors='coerce').dt.strftime('%Y-%m-%d')
 
+    # Corrige problema de encoding em colunas de texto
     if 'justificativa' in df.columns:
         df['justificativa'] = df['justificativa'].astype(str).apply(
             lambda x: x.encode('latin-1').decode('utf-8', 'ignore') if pd.notna(x) else x
         )
 
     df.dropna(subset=['cpf_cnpj', 'data_embargo'], inplace=True)
-
     df = df.replace({np.nan: None})
 
     dados_para_inserir = df.to_dict(orient='records')
@@ -100,8 +93,7 @@ def carregar_dados(supabase: Client):
         print("   - Nenhum dado para inserir. Encerrando o processo.")
         return
 
-    # --- 4. CARGA (Load) ---
-    print(f"3. Carregando dados para a tabela '{NOME_TABELA}'...")
+    print(f"3. Carregando dados para a tabela '{NOME_TABELA}' no Supabase...")
 
     tamanho_lote = 500
     total_inserido = 0
@@ -118,12 +110,11 @@ def carregar_dados(supabase: Client):
     print("\n--- PROCESSO DE ETL (TERMOS DE EMBARGO) CONCLUÍDO ---")
 
 
-# --- Ponto de Entrada do Script ---
+
 if __name__ == "__main__":
     start_time = time.time()
     try:
-        supabase_client = setup_supabase_client()
-        carregar_dados(supabase_client)
+        carregar_dados_embargos()
     except Exception as e:
         print(f"Ocorreu um erro fatal durante a execução: {e}")
 

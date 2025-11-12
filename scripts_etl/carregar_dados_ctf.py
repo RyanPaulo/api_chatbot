@@ -1,96 +1,84 @@
-# api_chatbot/scripts_etl/carregar_dados_ctf.py
-
 import os
 import pandas as pd
-from supabase import create_client, Client
 from dotenv import load_dotenv
 import time
 import numpy as np
 
 
-# --- 1. CONFIGURAÇÃO E CONEXÃO ---
 
-def setup_supabase_client() -> Client:
-    """
-    Carrega as variáveis de ambiente e inicializa o cliente Supabase.
-    """
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-
-    print(f"Procurando arquivo .env em: {os.path.abspath(dotenv_path)}")
-    load_dotenv(dotenv_path=dotenv_path)
-
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
-
-    if not supabase_url or not supabase_key:
-        raise Exception("ERRO: As variáveis de ambiente SUPABASE_URL e SUPABASE_KEY não foram definidas.")
-
-    print("Credenciais do Supabase carregadas com sucesso.")
-    return create_client(supabase_url, supabase_key)
+try:
+    from ..supabase_cliente import supabase
+except ImportError:
+    # Adiciona o caminho do projeto para permitir a execução direta do script
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from supabase_client import supabase
 
 
-# --- Variáveis de Configuração ---
 
-# ATENÇÃO: Renomeie seu arquivo local para 'cadastro_ctf.csv' ou ajuste o nome aqui
-NOME_ARQUIVO_LOCAL = "pessoasJuridicas.csv"  # Ajustado para o nome que você está usando
-CAMINHO_ARQUIVO_LOCAL = os.path.join(os.path.dirname(__file__), '..', 'dados_locais', NOME_ARQUIVO_LOCAL)
+
+URL_DADOS_IBAMA = "https://dadosabertos.ibama.gov.br/dados/CTF/APP/AC/pessoasJuridicas.csv"
 NOME_TABELA = "cadastro_tecnico_federal"
 
+## FUNÇÃO PRINCIPAL DE ETL PARA CTF
+def carregar_dados_ctf( ):
 
-def carregar_dados(supabase: Client):
-    """
-    Função principal que executa o processo de ETL para os dados do CTF/APP a partir de um arquivo local.
-    """
-    print("\n--- INICIANDO PROCESSO DE ETL (CADASTRO TÉCNICO FEDERAL - LOCAL) ---")
+    print("\n--- INICIANDO PROCESSO DE ETL (CADASTRO TÉCNICO FEDERAL - VIA URL) ---")
 
-    # --- 2. EXTRAÇÃO (Extraction) ---
-    print(f"1. Lendo o arquivo CSV local de: {CAMINHO_ARQUIVO_LOCAL}")
+
+    print(f"1. Extraindo dados diretamente da URL do IBAMA:\n   {URL_DADOS_IBAMA}")
     try:
-        # ==================================================================
-        # CORREÇÃO PRINCIPAL: Alterando o separador para ponto e vírgula
-        # ==================================================================
-        df = pd.read_csv(CAMINHO_ARQUIVO_LOCAL, sep=';', encoding='utf-8', on_bad_lines='skip', low_memory=False)
-        print("   - Arquivo lido com sucesso.")
-    except FileNotFoundError:
-        print(f"   - ERRO CRÍTICO: Arquivo '{NOME_ARQUIVO_LOCAL}' não encontrado na pasta 'dados_locais'.")
-        return
+        # Usa pandas para ler o CSV diretamente do link, especificando o separador e encoding
+        df = pd.read_csv(
+            URL_DADOS_IBAMA,
+            sep=';',
+            encoding='utf-8',
+            on_bad_lines='skip',
+            low_memory=False
+        )
+        print("   - Dados extraídos com sucesso.")
     except Exception as e:
-        print(f"   - ERRO CRÍTICO ao ler o arquivo: {e}")
+        print(f"   - ERRO CRÍTICO ao tentar baixar e ler os dados da URL: {e}")
         return
 
-    # --- 3. TRANSFORMAÇÃO (Transformation) ---
+
     print("2. Transformando os dados...")
 
     # Mapeamento das colunas do CSV para as colunas do nosso banco de dados
-    # ATENÇÃO: Os nomes das colunas no arquivo são diferentes do Google Sheets
     mapa_colunas = {
         'CNPJ': 'cnpj',
         'Razão Social': 'razao_social',
-        'Situação cadastral': 'situacao_cadastro',  # 'c' minúsculo
-        'Última Atualização Relatório': 'data_situacao_cadastral',  # Usando a data de atualização
-        'Estado': 'uf'  # Usando a coluna 'Estado'
+        'Situação cadastral': 'situacao_cadastro',
+        'Última Atualização Relatório': 'data_situacao_cadastral',
+        'Estado': 'uf'
     }
 
-    colunas_no_csv = list(mapa_colunas.keys())
+    colunas_necessarias = list(mapa_colunas.keys())
 
-    if not all(col in df.columns for col in colunas_no_csv):
-        print("   - ERRO CRÍTICO: Colunas essenciais não foram encontradas no arquivo CSV.")
-        print(f"   - Colunas esperadas: {colunas_no_csv}")
-        print(f"   - Colunas encontradas: {df.columns.tolist()}")
+    # Verifica se todas as colunas esperadas existem no DataFrame
+    if not all(col in df.columns for col in colunas_necessarias):
+        print("   - ERRO CRÍTICO: Colunas essenciais não foram encontradas no arquivo CSV baixado.")
+        print(f"   - Colunas esperadas: {colunas_necessarias}")
+        print(f"   - Colunas encontradas no arquivo: {df.columns.tolist()}")
         return
 
-    print(f"   - Mapeando as colunas...")
-    df = df[colunas_no_csv].rename(columns=mapa_colunas)
+    print("   - Mapeando e renomeando colunas...")
+    df = df[colunas_necessarias].rename(columns=mapa_colunas)
 
+    print("   - Limpando e formatando os dados...")
+    # Remove caracteres não numéricos do CNPJ
     df['cnpj'] = df['cnpj'].astype(str).str.replace(r'\D', '', regex=True)
-    # A data de atualização já parece estar em um formato bom, vamos apenas converter
-    df['data_situacao_cadastral'] = pd.to_datetime(df['data_situacao_cadastral'], errors='coerce').dt.strftime(
-        '%Y-%m-%d')
 
+    # Converte a data para o formato YYYY-MM-DD, tratando erros
+    df['data_situacao_cadastral'] = pd.to_datetime(df['data_situacao_cadastral'], errors='coerce').dt.strftime('%Y-%m-%d')
+
+    # Remove linhas onde o CNPJ ou a data são nulos após a conversão
     df.dropna(subset=['cnpj', 'data_situacao_cadastral'], inplace=True)
 
+    # Substitui valores NaN do Pandas por None, que é compatível com o banco de dados
     df = df.replace({np.nan: None})
 
+    # Converte o DataFrame limpo para uma lista de dicionários, pronta para inserção
     dados_para_inserir = df.to_dict(orient='records')
     print(f"   - {len(dados_para_inserir)} registros válidos prontos para serem inseridos.")
 
@@ -98,32 +86,34 @@ def carregar_dados(supabase: Client):
         print("   - Nenhum dado para inserir. Encerrando o processo.")
         return
 
-    # --- 4. CARGA (Load) ---
-    print(f"3. Carregando dados para a tabela '{NOME_TABELA}'...")
 
-    tamanho_lote = 500
+    print(f"3. Carregando dados para a tabela '{NOME_TABELA}' no Supabase...")
+
+    tamanho_lote = 500  # Insere os dados em lotes para evitar sobrecarga
     total_inserido = 0
     for i in range(0, len(dados_para_inserir), tamanho_lote):
         lote = dados_para_inserir[i:i + tamanho_lote]
         try:
+            # Usa o cliente Supabase importado para inserir o lote
             supabase.table(NOME_TABELA).insert(lote).execute()
             total_inserido += len(lote)
             print(f"   - Lote {i // tamanho_lote + 1} inserido. Total de registros: {total_inserido}")
         except Exception as e:
             print(f"   - ERRO ao inserir o lote {i // tamanho_lote + 1}: {e}")
+            # 'pass' continua para o próximo lote mesmo se um falhar
             pass
 
     print("\n--- PROCESSO DE ETL (CTF/APP) CONCLUÍDO ---")
 
 
-# --- Ponto de Entrada do Script ---
 if __name__ == "__main__":
     start_time = time.time()
     try:
-        supabase_client = setup_supabase_client()
-        carregar_dados(supabase_client)
+        # A conexão já é feita no `supabase_cliente.py`, então apenas chamamos a função
+        carregar_dados_ctf()
     except Exception as e:
         print(f"Ocorreu um erro fatal durante a execução: {e}")
 
     end_time = time.time()
     print(f"Tempo total de execução: {end_time - start_time:.2f} segundos.")
+

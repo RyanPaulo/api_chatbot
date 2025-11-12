@@ -27,6 +27,7 @@ Para executar o projeto, é necessário configurar e rodar os dois serviços (AP
 
 **Pré-requisitos:**
 *   Python 3.10 ou superior.
+```
 
 ---
 

@@ -1,95 +1,121 @@
-# api_chatbot/scripts_etl/carregar_dados_legislacao.py
-
 import os
 import pandas as pd
-from supabase import create_client, Client
-from dotenv import load_dotenv
 import time
 import numpy as np
-from sentence_transformers import SentenceTransformer
+import requests
+import zipfile
+import io
+
+try:
+    from ..supabase_cliente import supabase
+except ImportError:
+    # Adiciona o caminho do projeto para permitir a execução direta do script
+    import sys
+
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from supabase_cliente import supabase
+
+# URL direta para o arquivo .ZIP de autos de infração distribuídos
+URL_DADOS_IBAMA_ZIP = "https://dadosabertos.ibama.gov.br/dados/SIFISC/auto_infracao/auto_infracao_distribuidos/ultimos_5_anos_infra_dist_csv.zip"
+NOME_TABELA = "autuacoes_ibama"
 
 
-# --- 1. CONFIGURAÇÃO E CONEXÃO ---
+## FUNÇÃO PARA AUTOS DE INFRAÇÃO
+def carregar_dados_infracoes():
 
-def setup_supabase_client() -> Client:
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-    print(f"Procurando arquivo .env em: {os.path.abspath(dotenv_path)}")
-    load_dotenv(dotenv_path=dotenv_path)
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
-    if not supabase_url or not supabase_key:
-        raise Exception("ERRO: Variáveis de ambiente do Supabase não definidas.")
-    print("Credenciais do Supabase carregadas.")
-    return create_client(supabase_url, supabase_key)
+    print("\n--- INICIANDO PROCESSO DE ETL (AUTOS DE INFRAÇÃO - VIA URL) ---")
 
-
-# --- Variáveis de Configuração ---
-
-NOME_ARQUIVO_LOCAL = "legislacao_base.csv"
-CAMINHO_ARQUIVO_LOCAL = os.path.join(os.path.dirname(__file__), '..', 'dados_locais', NOME_ARQUIVO_LOCAL)
-NOME_TABELA = "legislacao_ambiental"
-MODELO_EMBEDDING = 'all-MiniLM-L6-v2'
-
-
-def carregar_dados(supabase: Client):
-    print("\n--- INICIANDO ETL DE LEGISLAÇÃO AMBIENTAL ---")
-
-    # --- 2. EXTRAÇÃO (Extraction) ---
-    print(f"1. Lendo o arquivo CSV local: {CAMINHO_ARQUIVO_LOCAL}")
+    print(f"1. Extraindo dados do arquivo ZIP da URL:\n   {URL_DADOS_IBAMA_ZIP}")
     try:
-        df = pd.read_csv(CAMINHO_ARQUIVO_LOCAL, sep=';', encoding='utf-8')
-        print(f"   - {len(df)} leis encontradas no arquivo.")
+        # Faz o download do conteúdo do arquivo .zip em memória
+        response = requests.get(URL_DADOS_IBAMA_ZIP)
+        response.raise_for_status()  # Lança um erro se o download falhar
+
+        # Abre o arquivo .zip a partir do conteúdo baixado
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            # Encontra o primeiro arquivo .csv dentro do .zip
+            nome_csv = next((f for f in z.namelist() if f.endswith('.csv')), None)
+            if not nome_csv:
+                raise FileNotFoundError("Nenhum arquivo .csv encontrado dentro do .zip baixado.")
+
+            print(f"   - Arquivo CSV encontrado no ZIP: '{nome_csv}'")
+            # Lê o arquivo CSV diretamente do .zip
+            with z.open(nome_csv) as f:
+                df = pd.read_csv(
+                    f,
+                    sep=';',
+                    encoding='latin-1',
+                    on_bad_lines='skip',
+                    low_memory=False
+                )
+        print("   - Dados extraídos com sucesso.")
     except Exception as e:
-        print(f"   - ERRO CRÍTICO ao ler o arquivo: {e}")
+        print(f"   - ERRO CRÍTICO ao baixar e ler os dados da URL: {e}")
         return
 
-    # --- 3. TRANSFORMAÇÃO (Transformation) ---
-    print("2. Transformando os dados e gerando embeddings...")
+    print("2. Transformando os dados...")
 
-    print(f"   - Carregando o modelo de IA '{MODELO_EMBEDDING}'...")
-    model = SentenceTransformer(MODELO_EMBEDDING)
+    mapa_colunas = {
+        'CPF_CNPJ_INFRATOR': 'cpf_cnpj',
+        'NOME_INFRATOR': 'nome_autuado',
+        'DAT_HORA_AUTO_INFRACAO': 'data_auto',
+        'VAL_AUTO_INFRACAO': 'valor_multa',
+        'DES_INFRACAO': 'descricao_infracao',
+        'MUNICIPIO': 'municipio',
+        'UF': 'uf'
+    }
+    colunas_necessarias = list(mapa_colunas.keys())
 
-    df['texto_para_embedding'] = df['titulo'] + " " + df['resumo']
+    if not all(col in df.columns for col in colunas_necessarias):
+        print("   - ERRO CRÍTICO: Colunas essenciais não foram encontradas no arquivo CSV.")
+        return
 
-    print("   - Gerando embeddings... (Isso pode levar um momento)")
-    embeddings = model.encode(df['texto_para_embedding'].tolist(), show_progress_bar=True)
+    print("   - Mapeando, limpando e formatando os dados...")
+    df = df[colunas_necessarias].rename(columns=mapa_colunas)
 
-    # ==================================================================
-    # CORREÇÃO PRINCIPAL: Convertendo cada embedding para uma lista Python
-    # ==================================================================
-    df['embedding'] = [embedding.tolist() for embedding in embeddings]
+    # Limpeza e conversão de tipos
+    df['cpf_cnpj'] = df['cpf_cnpj'].astype(str).str.replace(r'\D', '', regex=True)
+    df['valor_multa'] = pd.to_numeric(df['valor_multa'].astype(str).str.replace(',', '.', regex=False), errors='coerce')
+    df['data_auto'] = pd.to_datetime(df['data_auto'], errors='coerce').dt.strftime('%Y-%m-%d')
 
-    df['palavras_chave'] = df['palavras_chave'].apply(lambda x: x.split(',') if isinstance(x, str) else [])
+    # Corrige problema de encoding na coluna de descrição
+    if 'descricao_infracao' in df.columns:
+        df['descricao_infracao'] = df['descricao_infracao'].astype(str).apply(
+            lambda x: x.encode('latin-1').decode('utf-8', 'ignore') if pd.notna(x) else x
+        )
 
-    colunas_tabela = ['titulo', 'resumo', 'link_oficial', 'palavras_chave', 'embedding', 'tipo_norma', 'orgao_emissor']
-    df_final = df[colunas_tabela]
+    df.dropna(subset=['cpf_cnpj', 'data_auto'], inplace=True)
+    df = df.replace({np.nan: None})
 
-    df_final = df_final.replace({np.nan: None})
-    dados_para_inserir = df_final.to_dict(orient='records')
+    dados_para_inserir = df.to_dict(orient='records')
+    print(f"   - {len(dados_para_inserir)} registros válidos prontos para serem inseridos.")
 
-    print(f"   - {len(dados_para_inserir)} registros prontos para serem inseridos.")
+    if not dados_para_inserir:
+        print("   - Nenhum dado para inserir. Encerrando o processo.")
+        return
 
-    # --- 4. CARGA (Load) ---
-    print(f"3. Carregando dados para a tabela '{NOME_TABELA}'...")
+    print(f"3. Carregando dados para a tabela '{NOME_TABELA}' no Supabase...")
 
-    print("   - Limpando a tabela existente...")
-    supabase.table(NOME_TABELA).delete().neq('id', 0).execute()
+    tamanho_lote = 500
+    total_inserido = 0
+    for i in range(0, len(dados_para_inserir), tamanho_lote):
+        lote = dados_para_inserir[i:i + tamanho_lote]
+        try:
+            supabase.table(NOME_TABELA).insert(lote).execute()
+            total_inserido += len(lote)
+            print(f"   - Lote {i // tamanho_lote + 1} inserido. Total de registros: {total_inserido}")
+        except Exception as e:
+            print(f"   - ERRO ao inserir o lote {i // tamanho_lote + 1}: {e}")
+            pass
 
-    try:
-        supabase.table(NOME_TABELA).insert(dados_para_inserir).execute()
-        print("   - Todos os registros de legislação foram inseridos com sucesso!")
-    except Exception as e:
-        print(f"   - ERRO ao inserir os dados: {e}")
-
-    print("\n--- PROCESSO DE ETL DE LEGISLAÇÃO CONCLUÍDO ---")
+    print("\n--- PROCESSO DE ETL (AUTOS DE INFRAÇÃO) CONCLUÍDO ---")
 
 
-# --- Ponto de Entrada do Script ---
+
 if __name__ == "__main__":
     start_time = time.time()
     try:
-        supabase_client = setup_supabase_client()
-        carregar_dados(supabase_client)
+        carregar_dados_infracoes()
     except Exception as e:
         print(f"Ocorreu um erro fatal durante a execução: {e}")
 
