@@ -2,7 +2,7 @@ Com certeza! Fiz todos os ajustes que você orientou, corrigi os erros de numera
 
 Aqui está a versão final e corrigida do arquivo, pronta para ser copiada e colada no seu projeto.
 
-```markdown
+
 # Chatbot de Conformidade Ambiental
 
 ## Objetivo do Projeto
